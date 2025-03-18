@@ -24,21 +24,13 @@ SPREADSHEET_ID = os.getenv("SPREADSHEET_ID")
 if not SPREADSHEET_ID:
     raise ValueError("❌ Ошибка: SPREADSHEET_ID не найдено!")
 
-# ✅ Используем JSON-ключ из переменной окружения Railway
 CREDENTIALS_JSON = os.getenv("GOOGLE_CREDENTIALS_JSON")
-
 if not CREDENTIALS_JSON:
     raise ValueError("❌ Ошибка: GOOGLE_CREDENTIALS_JSON не найдено!")
 
 try:
     creds_dict = json.loads(CREDENTIALS_JSON)
-
-    # 🔥 Полное исправление: заменяем `\\n` на `\n`
     creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n").strip()
-
-    # 🔍 Проверяем, правильно ли преобразован ключ
-    print(f"[DEBUG] Исправленный private_key (первые 50 символов): {creds_dict.get('private_key')[:50]}")
-
     creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, SCOPE)
     client = gspread.authorize(creds)
     sheet = client.open_by_key(SPREADSHEET_ID).sheet1
@@ -56,17 +48,27 @@ SMTP_PASSWORD = os.getenv("SMTP_PASSWORD")
 if not SMTP_USER or not SMTP_PASSWORD:
     raise ValueError("❌ Ошибка: SMTP_USER или SMTP_PASSWORD не найдены!")
 
-def send_email(email, name, qr_filename):
+def send_email(email, name, qr_filename, language):
     try:
         msg = EmailMessage()
-        msg["Subject"] = "Ваш QR-код"
         msg["From"] = SMTP_USER
         msg["To"] = email
-        msg.set_content(f"""Спасибо за регистрацию на BI Ecosystem!  
+        msg["Subject"] = "Ваш QR-код" if language == "ru" else "QR-код билеті"
+
+        if language == "ru":
+            body = f"""Спасибо за регистрацию на BI Ecosystem!  
 
 Это ваш входной билет, пожалуйста, не удаляйте это письмо. QR-код нужно предъявить на входе для участия в розыгрыше ценных призов!  
 
-Ждём вас 15 апреля в 9:30 по адресу: мкр. Шымсити 101/1, Tulip Hall""")
+Ждём вас 15 апреля в 9:30 по адресу: мкр. Шымсити 101/1, Tulip Hall"""
+        else:  # "kz"
+            body = """BI Ecosystem жүйесіне тіркелгеніңізге рахмет! 
+
+Бұл сіздің кіруге арналған билетіңіз, өтініш осы хатты өшірмеңіз. Ұтыс ойындарында қатысу үшін осы QR кодты кіру есігі алдында көрсету қажет.
+
+СІзді 15 сәуір күні сағат 09:30 Шымкент қаласы,  "Шымсити" ықшам ауданы, 101/1 Tulip Hall, мекен жайы бойынша күтеміз."""
+
+        msg.set_content(body)
 
         with open(qr_filename, "rb") as qr_file:
             msg.add_attachment(
@@ -95,10 +97,10 @@ def process_new_guests():
 
         for i in range(1, len(all_values)):
             row = all_values[i]
-            if len(row) < 8:  # Проверяем, есть ли 8 колонок
+            if len(row) < 11:  # Теперь проверяем, что есть хотя бы 11 колонок (до language)
                 continue
 
-            email, name, phone, status = row[0], row[1], row[2], row[7]
+            email, name, phone, status, language = row[0], row[1], row[2], row[7], row[10].strip().lower()
 
             if not name or not phone or not email or status.strip().lower() == "done":
                 continue
@@ -110,7 +112,7 @@ def process_new_guests():
             qr = qrcode.make(qr_data)
             qr.save(qr_filename)
 
-            if send_email(email, name, qr_filename):
+            if send_email(email, name, qr_filename, language):
                 sheet.update_cell(i+1, 8, "Done")
     except Exception as e:
         print(f"[Ошибка] при обработке гостей: {e}")
@@ -135,5 +137,5 @@ def home():
     return "QR Code Generator is running!", 200
 
 if __name__ == '__main__':
-    port = int(os.environ.get("PORT", 5000))  # Railway использует PORT
+    port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
