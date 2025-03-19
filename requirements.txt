@@ -3,4 +3,3 @@ gspread
 oauth2client
 qrcode
 Pillow
-gunicorn
