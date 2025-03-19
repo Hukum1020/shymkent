@@ -9,6 +9,7 @@ import traceback
 from email.message import EmailMessage
 from oauth2client.service_account import ServiceAccountCredentials
 from flask import Flask
+import threading
 
 app = Flask(__name__)
 
@@ -48,89 +49,85 @@ SMTP_PASSWORD = os.getenv("SMTP_PASSWORD")
 if not SMTP_USER or not SMTP_PASSWORD:
     raise ValueError("❌ Ошибка: SMTP_USER или SMTP_PASSWORD не найдены!")
 
-def send_email(email, name, qr_filename, language):
+def send_email(email, qr_filename, language):
     try:
         msg = EmailMessage()
         msg["From"] = SMTP_USER
         msg["To"] = email
         msg["Subject"] = "Ваш QR-код" if language == "ru" else "QR-код билеті"
+        msg.set_type("multipart/related")  # Оставляем для встраивания QR-кода
 
-        if language == "ru":
-            body = f"""Спасибо за регистрацию на BI Ecosystem!  
+        # Загружаем HTML-шаблон
+        template_filename = f"shym{language}.html"
+        if os.path.exists(template_filename):
+            with open(template_filename, "r", encoding="utf-8") as template_file:
+                html_content = template_file.read()
+        else:
+            print(f"❌ Файл шаблона {template_filename} не найден.")
+            return False
 
-Это ваш входной билет, пожалуйста, не удаляйте это письмо. QR-код нужно предъявить на входе для участия в розыгрыше ценных призов!  
+        # ✅ Встраиваем логотип как вложение
+        logo_path = "logo.png"
+        if os.path.exists(logo_path):
+            with open(logo_path, "rb") as logo_file:
+                msg.add_related(logo_file.read(), maintype="image", subtype="png", filename="logo.png", cid="logo")
+            html_content = html_content.replace('src="logo.png"', 'src="cid:logo"')
+        else:
+            print("⚠️ Логотип не найден, письмо отправляется без него.")
 
-Ждём вас 15 апреля в 9:30 по адресу: мкр. Шымсити 101/1, Tulip Hall"""
-        else:  # "kz"
-            body = """BI Ecosystem жүйесіне тіркелгеніңізге рахмет! 
-
-Бұл сіздің кіруге арналған билетіңіз, өтініш осы хатты өшірмеңіз. Ұтыс ойындарында қатысу үшін осы QR кодты кіру есігі алдында көрсету қажет.
-
-СІзді 15 сәуір күні сағат 09:30 Шымкент қаласы,  "Шымсити" ықшам ауданы, 101/1 Tulip Hall, мекен жайы бойынша күтеміз."""
-
-        msg.set_content(body)
-
+        # ✅ Встраиваем QR-код
         with open(qr_filename, "rb") as qr_file:
-            msg.add_attachment(
-                qr_file.read(),
-                maintype="image",
-                subtype="png",
-                filename="qrcode.png"
-            )
+            msg.add_related(qr_file.read(), maintype="image", subtype="png", filename="qrcode.png", cid="qr")
 
+        # Подставляем QR-код в HTML
+        html_content = html_content.replace('src="qrcode.png"', 'src="cid:qr"')
+
+        # Добавляем HTML-контент
+        msg.add_alternative(html_content, subtype="html")
+
+        # Отправка письма
         context = ssl.create_default_context()
         with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:
             server.starttls(context=context)
             server.login(SMTP_USER, SMTP_PASSWORD)
             server.send_message(msg)
 
-        print(f"[OK] Письмо отправлено на {email}")
+        print(f"✅ Письмо отправлено на {email}")
         return True
     except Exception as e:
-        print(f"[Ошибка] Не удалось отправить письмо на {email}: {e}")
+        print(f"❌ Ошибка при отправке письма: {e}")
         traceback.print_exc()
         return False
 
 def process_new_guests():
     try:
         all_values = sheet.get_all_values()
-
+        
         for i in range(1, len(all_values)):
             row = all_values[i]
-            if len(row) < 11:  # Теперь проверяем, что есть хотя бы 11 колонок (до language)
+            if len(row) < 11:
                 continue
-
+            
             email, name, phone, status, language = row[0], row[1], row[2], row[7], row[10].strip().lower()
-
+            
             if not name or not phone or not email or status.strip().lower() == "done":
                 continue
-
+            
             qr_data = f"Name: {name}\nPhone: {phone}\nEmail: {email}"
             os.makedirs("qrcodes", exist_ok=True)
             qr_filename = f"qrcodes/{email.replace('@', '_')}.png"
-
+            
             qr = qrcode.make(qr_data)
             qr.save(qr_filename)
-
-            if send_email(email, name, qr_filename, language):
+            
+            if send_email(email, qr_filename, language):
                 sheet.update_cell(i+1, 8, "Done")
     except Exception as e:
         print(f"[Ошибка] при обработке гостей: {e}")
         traceback.print_exc()
 
-# Фоновый процесс (для обработки Google Sheets)
-def background_task():
-    while True:
-        try:
-            process_new_guests()
-        except Exception as e:
-            print(f"[Ошибка] {e}")
-            traceback.print_exc()
-        time.sleep(30)
-
-# Запуск фонового процесса при старте
-import threading
-threading.Thread(target=background_task, daemon=True).start()
+# Фоновый процесс
+threading.Thread(target=lambda: [process_new_guests(), time.sleep(30)], daemon=True).start()
 
 @app.route("/")
 def home():
