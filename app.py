@@ -112,10 +112,10 @@ def process_new_guests():
         
         for i in range(1, len(all_values)):
             row = all_values[i]
-            if len(row) < 11:
+            if len(row) < 10:
                 continue
             
-            email, name, phone, status, language = row[0], row[1], row[2], row[7], row[10].strip().lower()
+            email, name, phone, status, language = row[0], row[1], row[2], row[8], row[3].strip().lower()
             
             if not name or not phone or not email or status.strip().lower() == "done":
                 continue
@@ -128,7 +128,7 @@ def process_new_guests():
             qr.save(qr_filename)
             
             if send_email(email, qr_filename, language):
-                sheet.update_cell(i+1, 8, "Done")
+                sheet.update_cell(i+1, 9, "Done")
     except Exception as e:
         print(f"[Ошибка] при обработке гостей: {e}")
         traceback.print_exc()
