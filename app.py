@@ -6,6 +6,7 @@ import ssl
 import gspread
 import json
 import traceback
+import random
 from email.message import EmailMessage
 from oauth2client.service_account import ServiceAccountCredentials
 from flask import Flask
@@ -51,10 +52,12 @@ if not SMTP_USER or not SMTP_PASSWORD:
 
 def send_email(email, qr_filename, language):
     try:
+        subject_ru = f"Ваш персональный QR-код #{random.randint(1000, 9999)}"
+        subject_kz = f"Сіздің жеке QR-кодыңыз #{random.randint(1000, 9999)}"
         msg = EmailMessage()
         msg["From"] = SMTP_USER
         msg["To"] = email
-        msg["Subject"] = "Ваш QR-код" if language == "ru" else "QR-код билеті"
+        msg["Subject"] = subject_ru if language == "ru" else subject_kz
         msg.set_type("multipart/related")  # Оставляем для встраивания QR-кода
 
         # Загружаем HTML-шаблон
@@ -65,6 +68,10 @@ def send_email(email, qr_filename, language):
         else:
             print(f"❌ Файл шаблона {template_filename} не найден.")
             return False
+
+        # ✅ Добавляем уникальный идентификатор в письмо
+        unique_id = random.randint(100000, 999999)
+        html_content = html_content.replace("<!--UNIQUE_PLACEHOLDER-->", str(unique_id))
 
         # ✅ Встраиваем логотип как вложение
         logo_path = "logo.png"
@@ -126,8 +133,18 @@ def process_new_guests():
         print(f"[Ошибка] при обработке гостей: {e}")
         traceback.print_exc()
 
-# Фоновый процесс
-threading.Thread(target=lambda: [process_new_guests(), time.sleep(30)], daemon=True).start()
+# Фоновый процесс с бесконечным циклом проверки новых пользователей
+def background_task():
+    while True:
+        try:
+            process_new_guests()
+        except Exception as e:
+            print(f"[Ошибка] {e}")
+            traceback.print_exc()
+        time.sleep(30)  # Проверять каждые 30 секунд
+
+# Запуск фонового процесса
+threading.Thread(target=background_task, daemon=True).start()
 
 @app.route("/")
 def home():
