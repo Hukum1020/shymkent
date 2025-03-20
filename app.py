@@ -115,7 +115,7 @@ def process_new_guests():
             if len(row) < 10:
                 continue
             
-            email, name, phone, status, language = row[0], row[1], row[2], row[8], row[3].strip().lower()
+            email, name, phone, status, language = row[1], row[0], row[2], row[8], row[3].strip().lower()
             
             if not name or not phone or not email or status.strip().lower() == "done":
                 continue
