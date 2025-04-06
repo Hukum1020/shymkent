@@ -136,6 +136,9 @@ def process_new_guests():
             
             if send_email(email, qr_filename, language, name=name):
                 sheet.update_cell(i+1, 9, "Done")
+            
+            time.sleep(1)
+            
     except Exception as e:
         print(f"[Ошибка] при обработке гостей: {e}")
         traceback.print_exc()
@@ -148,7 +151,7 @@ def background_task():
         except Exception as e:
             print(f"[Ошибка] {e}")
             traceback.print_exc()
-        time.sleep(30)  # Проверять каждые 30 секунд
+        time.sleep(15)  # Проверять каждые 30 секунд
 
 # Запуск фонового процесса
 threading.Thread(target=background_task, daemon=True).start()
