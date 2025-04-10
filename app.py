@@ -7,9 +7,7 @@ import gspread
 import json
 import traceback
 import random
-import unicodedata
 from email.message import EmailMessage
-from email.utils import formataddr
 from oauth2client.service_account import ServiceAccountCredentials
 from flask import Flask
 import threading
@@ -42,7 +40,7 @@ except Exception as e:
     raise ValueError(f"❌ Ошибка подключения к Google Sheets: {e}")
 
 # ------------------------------
-# Настройка SMTP (Gmail)
+# Настройка SMTP (Brevo)
 # ------------------------------
 SMTP_SERVER = "smtp-relay.brevo.com"
 SMTP_PORT = 587
@@ -52,27 +50,15 @@ SMTP_PASSWORD = os.getenv("SMTP_PASSWORD")
 if not SMTP_USER or not SMTP_PASSWORD:
     raise ValueError("❌ Ошибка: SMTP_USER или SMTP_PASSWORD не найдены!")
 
-def to_ascii_safe(text):
-    try:
-        return unicodedata.normalize('NFKD', text).encode('ascii', 'ignore').decode()
-    except:
-        return "User"
-
-def send_email(email, qr_filename, language, name=None):
+def send_email(email, qr_filename, language, name=None, row_index=None, sheet=None):
     try:
         random_code = random.randint(1000, 9999)
-        if name:
-            subject_ru = f"{name}, ваш персональный QR-код #{random_code}"
-            subject_kz = f"{name}, сіздің жеке QR-кодыңыз #{random_code}"
-        else:
-            subject_ru = f"Ваш персональный QR-код #{random_code}"
-            subject_kz = f"Сіздің жеке QR-кодыңыз #{random_code}"
+        subject = f"{name}, ваш персональный QR-код #{random_code}" if language == "ru" else f"{name}, сіздің жеке QR-кодыңыз #{random_code}"
 
         msg = EmailMessage()
-        ascii_name = to_ascii_safe(name) if name else "Guest"
-        msg["From"] = formataddr((ascii_name, SMTP_USER))
+        msg["From"] = "noreply@biecosystem.kz"
         msg["To"] = email
-        msg["Subject"] = subject_ru if language == "ru" else subject_kz
+        msg["Subject"] = subject
         msg.set_type("multipart/related")
 
         template_filename = f"shym{language}.html"
@@ -91,13 +77,11 @@ def send_email(email, qr_filename, language, name=None):
             with open(logo_path, "rb") as logo_file:
                 msg.add_related(logo_file.read(), maintype="image", subtype="png", filename="logo.png", cid="logo")
             html_content = html_content.replace('src="logo.png"', 'src="cid:logo"')
-        else:
-            print("⚠️ Логотип не найден, письмо отправляется без него.")
 
         with open(qr_filename, "rb") as qr_file:
             msg.add_related(qr_file.read(), maintype="image", subtype="png", filename="qrcode.png", cid="qr")
-        html_content = html_content.replace('src="qrcode.png"', 'src="cid:qr"')
 
+        html_content = html_content.replace('src="qrcode.png"', 'src="cid:qr"')
         msg.add_alternative(html_content, subtype="html")
 
         context = ssl.create_default_context()
@@ -108,8 +92,23 @@ def send_email(email, qr_filename, language, name=None):
 
         print(f"✅ Письмо отправлено на {email}")
         return True
+
+    except smtplib.SMTPNotSupportedError as smtp_err:
+        print(f"❌ SMTP ошибка: {smtp_err}")
+        traceback.print_exc()
+        if sheet and row_index is not None:
+            sheet.update_cell(row_index, 9, "Error")
+        return False
+
+    except UnicodeEncodeError as unicode_err:
+        print(f"❌ Unicode ошибка: {unicode_err}")
+        traceback.print_exc()
+        if sheet and row_index is not None:
+            sheet.update_cell(row_index, 9, "Error")
+        return False
+
     except Exception as e:
-        print(f"❌ Ошибка при отправке письма: {e}")
+        print(f"❌ Другая ошибка при отправке письма: {e}")
         traceback.print_exc()
         return False
 
@@ -122,9 +121,13 @@ def process_new_guests():
             if len(row) < 10:
                 continue
 
-            email, name, phone, status, language = row[1], row[0], row[2], row[8], row[3].strip().lower()
+            name = row[0].strip()
+            email = row[1].strip()
+            phone = row[2].strip()
+            language = row[3].strip().lower()
+            status = row[8].strip().lower()
 
-            if not name or not phone or not email or status.strip().lower() == "done":
+            if not name or not phone or not email or status == "done" or status == "error":
                 continue
 
             qr_data = f"Name: {name}\nPhone: {phone}\nEmail: {email}"
@@ -134,7 +137,7 @@ def process_new_guests():
             qr = qrcode.make(qr_data)
             qr.save(qr_filename)
 
-            if send_email(email, qr_filename, language, name=name):
+            if send_email(email, qr_filename, language, name=name, row_index=i+1, sheet=sheet):
                 sheet.update_cell(i+1, 9, "Done")
 
             time.sleep(1)
@@ -148,7 +151,7 @@ def background_task():
         try:
             process_new_guests()
         except Exception as e:
-            print(f"[Ошибка] {e}")
+            print(f"[Ошибка в фоновом процессе] {e}")
             traceback.print_exc()
         time.sleep(15)
 
