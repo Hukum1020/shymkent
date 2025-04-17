@@ -116,26 +116,33 @@ def send_email(email, qr_filename, language, name=None):
 def process_new_guests():
     try:
         all_values = sheet.get_all_values()
-        
+
         for i in range(1, len(all_values)):
             row = all_values[i]
             if len(row) < 10:
                 continue
-            
-            email, name, phone, status, language = row[1], row[0], row[2], row[8], row[3].strip().lower()
-            
-            if not name or not phone or not email or status.strip().lower() == "done":
+
+            name = row[0].strip()
+            email = row[1].strip()
+            phone = row[2].strip()
+            language = row[3].strip().lower()
+            status = row[8].strip().lower()
+
+            if not name or not phone or not email or status == "done" or status == "error":
                 continue
-            
+
             qr_data = f"Name: {name}\nPhone: {phone}\nEmail: {email}"
             os.makedirs("qrcodes", exist_ok=True)
             qr_filename = f"qrcodes/{email.replace('@', '_')}.png"
-            
+
             qr = qrcode.make(qr_data)
             qr.save(qr_filename)
-            
-            if send_email(email, qr_filename, language, name=name):
+
+            if send_email(email, qr_filename, language, name=name, row_index=i+1, sheet=sheet):
                 sheet.update_cell(i+1, 9, "Done")
+
+            time.sleep(1)
+
     except Exception as e:
         print(f"[Ошибка] при обработке гостей: {e}")
         traceback.print_exc()
