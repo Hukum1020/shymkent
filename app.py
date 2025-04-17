@@ -53,7 +53,7 @@ if not SMTP_USER or not SMTP_PASSWORD:
 def send_email(email, qr_filename, language, name=None, row_index=None, sheet=None):
     try:
         random_code = random.randint(1000, 9999)
-        subject = f"{name}, ваш персональный QR-код #{random_code}" if language == "ru" else f"{name}, сіздің жеке QR-кодыңыз #{random_code}"
+        subject = "Выигрывайте призы на BI Ecosystem в Шымкенте - уже завтра!"
 
         msg = EmailMessage()
         msg["From"] = "noreply@biecosystem.kz"
