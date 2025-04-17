@@ -7,6 +7,7 @@ import gspread
 import json
 import traceback
 import random
+import re
 from email.message import EmailMessage
 from oauth2client.service_account import ServiceAccountCredentials
 from flask import Flask
@@ -40,7 +41,7 @@ except Exception as e:
     raise ValueError(f"❌ Ошибка подключения к Google Sheets: {e}")
 
 # ------------------------------
-# Настройка SMTP (Gmail)
+# Настройка SMTP (Brevo)
 # ------------------------------
 SMTP_SERVER = "smtp-relay.brevo.com"
 SMTP_PORT = 587
@@ -50,15 +51,24 @@ SMTP_PASSWORD = os.getenv("SMTP_PASSWORD")
 if not SMTP_USER or not SMTP_PASSWORD:
     raise ValueError("❌ Ошибка: SMTP_USER или SMTP_PASSWORD не найдены!")
 
-def send_email(email, qr_filename, language, name=None):
+# ------------------------------
+# Проверка ASCII-символов в email
+# ------------------------------
+def is_ascii_email(email):
+    try:
+        email.encode("ascii")
+        return True
+    except UnicodeEncodeError:
+        return False
+
+# ------------------------------
+# Отправка письма
+# ------------------------------
+def send_email(email, qr_filename, language, name=None, row_index=None, sheet=None):
     try:
         random_code = random.randint(1000, 9999)
-        if name:
-            subject_ru = "Завтра встречаемся на BI Ecosystem — ждём Вас!"
-            subject_kz = "Сәлеметсіз бе! Ертең осы жылдың ең ірі оқиғасы — BI Ecosystem-де кездесеміз."
-        else:
-            subject_ru = "Завтра встречаемся на BI Ecosystem — ждём Вас!"
-            subject_kz = "Сәлеметсіз бе! Ертең осы жылдың ең ірі оқиғасы — BI Ecosystem-де кездесеміз."
+        subject_ru = "Выигрывайте призы на BI Ecosystem в Шымкенте - уже завтра!"
+        subject_kz = "Ертең Шымкентте өтетін BI Ecosystem шарасында жүлде ұтып алыңыз!"
 
         msg = EmailMessage()
         msg["From"] = "noreply@biecosystem.kz"
@@ -66,8 +76,6 @@ def send_email(email, qr_filename, language, name=None):
         msg["Subject"] = subject_ru if language == "ru" else subject_kz
         msg.set_type("multipart/related")
 
-
-        # Загружаем HTML-шаблон
         template_filename = f"shym{language}.html"
         if os.path.exists(template_filename):
             with open(template_filename, "r", encoding="utf-8") as template_file:
@@ -76,30 +84,21 @@ def send_email(email, qr_filename, language, name=None):
             print(f"❌ Файл шаблона {template_filename} не найден.")
             return False
 
-        # ✅ Добавляем уникальный идентификатор в письмо
         unique_id = random.randint(100000, 999999)
         html_content = html_content.replace("<!--UNIQUE_PLACEHOLDER-->", str(unique_id))
 
-        # ✅ Встраиваем логотип как вложение
         logo_path = "logo.png"
         if os.path.exists(logo_path):
             with open(logo_path, "rb") as logo_file:
                 msg.add_related(logo_file.read(), maintype="image", subtype="png", filename="logo.png", cid="logo")
             html_content = html_content.replace('src="logo.png"', 'src="cid:logo"')
-        else:
-            print("⚠️ Логотип не найден, письмо отправляется без него.")
 
-        # ✅ Встраиваем QR-код
         with open(qr_filename, "rb") as qr_file:
             msg.add_related(qr_file.read(), maintype="image", subtype="png", filename="qrcode.png", cid="qr")
 
-        # Подставляем QR-код в HTML
         html_content = html_content.replace('src="qrcode.png"', 'src="cid:qr"')
-
-        # Добавляем HTML-контент
         msg.add_alternative(html_content, subtype="html")
 
-        # Отправка письма
         context = ssl.create_default_context()
         with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:
             server.starttls(context=context)
@@ -108,11 +107,31 @@ def send_email(email, qr_filename, language, name=None):
 
         print(f"✅ Письмо отправлено на {email}")
         return True
-    except Exception as e:
-        print(f"❌ Ошибка при отправке письма: {e}")
+
+    except smtplib.SMTPNotSupportedError as smtp_err:
+        print(f"❌ SMTP ошибка: {smtp_err}")
         traceback.print_exc()
+        if sheet and row_index is not None:
+            sheet.update_cell(row_index, 9, "Error")
         return False
 
+    except UnicodeEncodeError as unicode_err:
+        print(f"❌ Unicode ошибка: {unicode_err}")
+        traceback.print_exc()
+        if sheet and row_index is not None:
+            sheet.update_cell(row_index, 9, "Error")
+        return False
+
+    except Exception as e:
+        print(f"❌ Другая ошибка при отправке письма: {e}")
+        traceback.print_exc()
+        if sheet and row_index is not None:
+            sheet.update_cell(row_index, 9, "Error")
+        return False
+
+# ------------------------------
+# Обработка новых гостей
+# ------------------------------
 def process_new_guests():
     try:
         all_values = sheet.get_all_values()
@@ -131,6 +150,11 @@ def process_new_guests():
             if not name or not phone or not email or status == "done" or status == "error":
                 continue
 
+            if not is_ascii_email(email):
+                print(f"❌ Email содержит не-ASCII символы: {email}")
+                sheet.update_cell(i + 1, 9, "Error")
+                continue
+
             qr_data = f"Name: {name}\nPhone: {phone}\nEmail: {email}"
             os.makedirs("qrcodes", exist_ok=True)
             qr_filename = f"qrcodes/{email.replace('@', '_')}.png"
@@ -147,19 +171,23 @@ def process_new_guests():
         print(f"[Ошибка] при обработке гостей: {e}")
         traceback.print_exc()
 
-# Фоновый процесс с бесконечным циклом проверки новых пользователей
+# ------------------------------
+# Фоновая задача
+# ------------------------------
 def background_task():
     while True:
         try:
             process_new_guests()
         except Exception as e:
-            print(f"[Ошибка] {e}")
+            print(f"[Ошибка в фоновом процессе] {e}")
             traceback.print_exc()
-        time.sleep(30)  # Проверять каждые 30 секунд
+        time.sleep(15)
 
-# Запуск фонового процесса
 threading.Thread(target=background_task, daemon=True).start()
 
+# ------------------------------
+# Flask-приложение
+# ------------------------------
 @app.route("/")
 def home():
     return "QR Code Generator is running!", 200
