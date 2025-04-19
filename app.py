@@ -68,7 +68,7 @@ def send_email(email, qr_filename, language, name=None, row_index=None, sheet=No
     try:
         random_code = random.randint(1000, 9999)
         subject_ru = "Выигрывайте призы на BI Ecosystem в Шымкенте - уже сегодня!"
-        subject_kz = "Ертең Шымкентте өтетін BI Ecosystem шарасында жүлде ұтып алыңыз!"
+        subject_kz = "Бүгін Шымкентте өтетін BI Ecosystem шарасында жүлде ұтып алыңыз!"
 
         msg = EmailMessage()
         msg["From"] = "noreply@biecosystem.kz"
