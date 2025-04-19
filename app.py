@@ -67,7 +67,7 @@ def is_ascii_email(email):
 def send_email(email, qr_filename, language, name=None, row_index=None, sheet=None):
     try:
         random_code = random.randint(1000, 9999)
-        subject_ru = "Выигрывайте призы на BI Ecosystem в Шымкенте - уже завтра!"
+        subject_ru = "Выигрывайте призы на BI Ecosystem в Шымкенте - уже сегодня!"
         subject_kz = "Ертең Шымкентте өтетін BI Ecosystem шарасында жүлде ұтып алыңыз!"
 
         msg = EmailMessage()
